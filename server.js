@@ -36,7 +36,7 @@ app.use(
       const allowedOrigins = [
         "http://localhost:8080",
         "https://teacher-job-frontend.vercel.app",
-        https://www.teacherjob.in,
+        https://www.teacherjob.in
       ];
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
