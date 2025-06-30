@@ -27,7 +27,7 @@ router.post("/forgot-password", forgotPassword); // New route for forgot passwor
 router.patch("/reset-password/:token", resetPassword); // New route for resetting password
 
 // --- Protected Routes (require user to be logged in) ---
-router.get("/logout", logout);
+router.post("/logout", logout);
 router.get("/me", protect, getMe);
 router.put("/updatepassword", protect, updatePassword);
 router.delete("/deleteaccount", protect, deleteAccount);
