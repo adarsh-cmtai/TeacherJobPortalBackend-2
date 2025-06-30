@@ -32,13 +32,23 @@ const app = express();
 // --- CORS Configuration ---
 app.use(
   cors({
-    origin: "http://localhost:8080",
+    origin: function (origin, callback) {
+      const allowedOrigins = [
+        "http://localhost:8080",
+        "https://teacher-job-frontend.vercel.app"
+      ];
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
-    // Added 'PATCH' to the methods array to allow password reset requests
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
+    allowedHeaders: ["Content-Type", "Authorization", "Cookie"]
   })
 );
+
 // ------------------------
 
 app.use(express.json());
