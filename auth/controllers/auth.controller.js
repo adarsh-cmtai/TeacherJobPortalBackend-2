@@ -379,12 +379,16 @@ export const googleLogin = async (req, res) => {
 
 // 7. LOGOUT: Clears the authentication cookie
 export const logout = (req, res) => {
-  res.cookie("token", "none", {
-    expires: new Date(Date.now() + 5 * 1000),
+  res.clearCookie('token', {
     httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    path: '/' // ✅ but ❌ no domain
   });
-  res.status(200).json({ success: true, message: "Logged out successfully" });
+
+  res.status(200).json({ success: true, message: 'Logged out successfully' });
 };
+
 
 // 8. GET ME: Retrieves the currently logged-in user's data
 // This route should be protected by middleware in a real application.
