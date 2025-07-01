@@ -23,6 +23,7 @@ import publicReviewRoutes from "./public/routes/public.routes.js";
 import resourceRoute from "./admin/routes/resource.routes.js";
 import pressArticle from "./admin/routes/pressArticle.routes.js";
 import PostjobRoutes from "./employer/routes/Postjob.routes.js";
+import carouselRoutes from './admin/routes/carousel.routes.js';
 
 // Initialize database connection after loading environment variables
 connectDB();
@@ -61,6 +62,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/employer", employerRoutes);
 app.use("/api/college", collegeRoutes);
 app.use("/api/admin", adminRoutes);
+app.use('/api/admin/carousel', carouselRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/contributions", contributionRoutes);
 app.use("/api", publicRoutes);
