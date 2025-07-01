@@ -6,6 +6,8 @@ export const upload = multer({ storage: storage });
 
 export const singleUpload = multer({ storage }).single('image');
 
+export const slideMediaUpload = multer({ storage }).single('backgroundMedia');
+
 export const agreementUpload = multer({ storage }).single('agreement');
 
 export const documentUploads = multer({ storage }).fields([
