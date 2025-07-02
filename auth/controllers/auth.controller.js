@@ -1,10 +1,17 @@
 import { User } from "../../models/User.model.js";
 import { EmployerProfile } from "../../employer/models/profile.model.js";
 import { CollegeProfile } from "../../college/models/profile.model.js";
+import { AdminProfile } from "../../admin/models/profile.model.js";
 import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
 import crypto from "crypto";
 import sendEmail from "../../utils/email.js";
+
+// --- NEW IMPORT ---
+import {
+  getEmployerWelcomeTemplate,
+  getEmployeeWelcomeTemplate,
+} from "../../utils/emailTemplates.js";
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -15,7 +22,7 @@ const generateToken = (id, role) => {
   });
 };
 
-// --- NEW HELPER: For TEMPORARY OTP token (15 minutes) ---
+// HELPER: For TEMPORARY OTP token (15 minutes)
 const generateTempToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: "15m",
@@ -28,14 +35,14 @@ const sendTokenResponse = (user, statusCode, res) => {
     expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "none",
+    sameSite: "strict",
   };
   res
     .status(statusCode)
     .cookie("token", token, options)
     .json({
       success: true,
-      token: token, // Send token in response for non-cookie clients
+      token: token,
       user: {
         _id: user._id,
         fullName: user.fullName,
@@ -45,12 +52,44 @@ const sendTokenResponse = (user, statusCode, res) => {
     });
 };
 
+// --- UPDATED & MORE ROBUST HELPER FUNCTION ---
+const sendWelcomeEmail = async (user) => {
+  try {
+    // <-- FIX: Use optional chaining (?.) and provide a fallback to prevent crashes.
+    const firstName = user.fullName?.split(" ")[0] || "there";
+    let subject = "";
+    let htmlBody = "";
+
+    // IMPORTANT: Based on your frontend code:
+    // 'employer' role is for "Teacher / Candidate"
+    // 'college' role is for "School / College"
+    if (user.role === "employer") {
+      subject = "✅ Welcome to TeacherJob.in – Let’s Build Your Career!";
+      htmlBody = getEmployeeWelcomeTemplate(firstName);
+    } else if (user.role === "college") {
+      subject = "🏫 Welcome to TeacherJob.in — For Employers";
+      htmlBody = getEmployerWelcomeTemplate(firstName);
+    }
+
+    if (subject && htmlBody) {
+      await sendEmail({
+        email: user.email,
+        subject: subject,
+        html: htmlBody,
+      });
+      console.log(`Welcome email sent to ${user.email} for role ${user.role}`);
+    }
+  } catch (error) {
+    console.error(`Failed to send welcome email to ${user.email}:`, error);
+  }
+};
+
 // 1. SIGNUP: Now sends a temporary token with the response
 export const signup = async (req, res) => {
   let { fullName, email, password, confirmPassword, role, termsAccepted } =
     req.body;
   if (role) role = role.toLowerCase().trim();
-  console.log(role)
+  console.log(role);
 
   if (
     !fullName ||
@@ -60,12 +99,10 @@ export const signup = async (req, res) => {
     !role ||
     !termsAccepted
   ) {
-    return res
-      .status(400)
-      .json({
-        success: false,
-        message: "Please provide all fields and accept terms",
-      });
+    return res.status(400).json({
+      success: false,
+      message: "Please provide all fields and accept terms",
+    });
   }
   if (password !== confirmPassword) {
     return res
@@ -76,12 +113,10 @@ export const signup = async (req, res) => {
   try {
     const userExists = await User.findOne({ email });
     if (userExists && userExists.isVerified) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "An account with this email already exists.",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "An account with this email already exists.",
+      });
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -117,6 +152,11 @@ export const signup = async (req, res) => {
       !(await CollegeProfile.findOne({ user: user._id }))
     ) {
       await CollegeProfile.create({ user: user._id, name: fullName });
+    } else if (
+      role === "admin" &&
+      !(await AdminProfile.findOne({ user: user._id }))
+    ) {
+      await AdminProfile.create({ user: user._id, name: fullName });
     }
 
     await user.save();
@@ -128,37 +168,32 @@ export const signup = async (req, res) => {
       message,
     });
 
-    // --- THE FIX IS HERE ---
     const tempToken = generateTempToken(user._id);
 
     return res.status(200).json({
       success: true,
       message: `An OTP has been sent to ${user.email}. Please verify.`,
-      tempToken: tempToken, // Send the token in the response
+      tempToken: tempToken,
     });
   } catch (error) {
     console.error("Signup Error:", error);
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: error.message || "Server error during signup.",
-      });
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Server error during signup.",
+    });
   }
 };
 
-// 2. VERIFY OTP: Now uses the temporary token from headers for verification
+// 2. VERIFY OTP: Now uses the temporary token and sends a welcome email
 export const verifyOtp = async (req, res) => {
   const { otp } = req.body;
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res
-      .status(401)
-      .json({
-        success: false,
-        message: "Not authorized, no verification token",
-      });
+    return res.status(401).json({
+      success: false,
+      message: "Not authorized, no verification token",
+    });
   }
   const token = authHeader.split(" ")[1];
 
@@ -178,18 +213,18 @@ export const verifyOtp = async (req, res) => {
     });
 
     if (!user) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "The OTP is invalid or has expired.",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "The OTP is invalid or has expired.",
+      });
     }
 
     user.isVerified = true;
     user.otp = undefined;
     user.otpExpires = undefined;
     await user.save();
+
+    await sendWelcomeEmail(user);
 
     sendTokenResponse(user, 200, res);
   } catch (error) {
@@ -264,17 +299,13 @@ export const forgotPassword = async (req, res) => {
   }
 };
 
-// 5. RESET PASSWORD: Sets a new password using the reset token (WITH DEBUGGING)
+// 5. RESET PASSWORD: Sets a new password using the reset token
 export const resetPassword = async (req, res) => {
-  console.log("Token received from URL:", req.params.token);
-
   try {
     const hashedToken = crypto
       .createHash("sha256")
       .update(req.params.token)
       .digest("hex");
-
-    console.log("Hashed token for DB lookup:", hashedToken);
 
     const user = await User.findOne({
       passwordResetToken: hashedToken,
@@ -282,15 +313,10 @@ export const resetPassword = async (req, res) => {
     });
 
     if (!user) {
-      console.log(
-        "DEBUG: User not found with this token. It's invalid or expired."
-      );
       return res
         .status(400)
         .json({ success: false, message: "Token is invalid or has expired." });
     }
-
-    console.log("DEBUG: User found successfully!", user.email);
 
     const { password, confirmPassword } = req.body;
     if (password !== confirmPassword) {
@@ -335,8 +361,10 @@ export const googleLogin = async (req, res) => {
     let user = await User.findOne({ email });
 
     if (user) {
+      // User exists, just log them in
       sendTokenResponse(user, 200, res);
     } else {
+      // This is a new user, create an account
       if (!role) {
         return res.status(400).json({
           success: false,
@@ -344,12 +372,15 @@ export const googleLogin = async (req, res) => {
         });
       }
       const randomPassword = crypto.randomBytes(16).toString("hex");
+
+      // <-- FIX: Added 'fullName: name' to save it to the User model.
       user = await User.create({
+        fullName: name,
         email,
         password: randomPassword,
         role,
         termsAccepted: true,
-        isVerified: true,
+        isVerified: true, // Google users are pre-verified
       });
 
       if (role === "employer") {
@@ -369,6 +400,10 @@ export const googleLogin = async (req, res) => {
           .status(400)
           .json({ success: false, message: "Invalid role for Google signup." });
       }
+
+      // <-- IMPROVEMENT: Send a welcome email to new Google sign-up users
+      await sendWelcomeEmail(user);
+
       sendTokenResponse(user, 201, res);
     }
   } catch (error) {
@@ -389,12 +424,9 @@ export const logout = (req, res) => {
   res.status(200).json({ success: true, message: 'Logged out successfully' });
 };
 
-
 // 8. GET ME: Retrieves the currently logged-in user's data
-// This route should be protected by middleware in a real application.
 export const getMe = async (req, res) => {
   try {
-    // Assuming a 'protect' middleware adds req.user
     if (!req.user || !req.user.id) {
       return res
         .status(401)
@@ -408,7 +440,12 @@ export const getMe = async (req, res) => {
     }
     res.status(200).json({
       success: true,
-      data: { id: user._id, email: user.email, role: user.role },
+      data: {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+        fullName: user.fullName,
+      },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Server Error" });
@@ -416,7 +453,6 @@ export const getMe = async (req, res) => {
 };
 
 // 9. UPDATE PASSWORD: Allows a logged-in user to change their password
-// This route should be protected by middleware.
 export const updatePassword = async (req, res) => {
   if (!req.user || !req.user.id) {
     return res.status(401).json({ success: false, message: "Not authorized" });
@@ -440,7 +476,6 @@ export const updatePassword = async (req, res) => {
 };
 
 // 10. DELETE ACCOUNT: Allows a logged-in user to delete their account
-// This route should be protected by middleware.
 export const deleteAccount = async (req, res) => {
   if (!req.user || !req.user.id) {
     return res.status(401).json({ success: false, message: "Not authorized" });
@@ -460,7 +495,6 @@ export const deleteAccount = async (req, res) => {
         .json({ success: false, message: "Incorrect password" });
     }
 
-    // Delete associated profiles and data (Add more as needed)
     if (user.role === "employer") {
       await EmployerProfile.deleteOne({ user: req.user.id });
     } else if (user.role === "college") {
