@@ -1,11 +1,14 @@
-// models/User.model.js
-
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
 const userSchema = new mongoose.Schema(
   {
+    fullName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
     email: {
       type: String,
       required: true,
@@ -13,15 +16,28 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
-    password: { type: String, required: true, select: false },
+    mobile: {
+      type: String,
+      required: false,
+      unique: true,
+      trim: true,
+      sparse: true,
+    },
+    password: { 
+      type: String, 
+      required: true, 
+      select: false 
+    },
     role: {
       type: String,
       enum: ["employee", "employer", "admin", "college"],
       required: true,
     },
-    termsAccepted: { type: Boolean, required: true, default: false },
-
-    // --- New Fields for Verification and Password Reset ---
+    termsAccepted: { 
+      type: Boolean, 
+      required: true, 
+      default: false 
+    },
     isVerified: {
       type: Boolean,
       default: false,
@@ -50,19 +66,16 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Hash password before saving
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
   this.password = await bcrypt.hash(this.password, 12);
   next();
 });
 
-// Method to compare entered password with the hashed one
 userSchema.methods.comparePassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-// Method to generate a password reset token
 userSchema.methods.createPasswordResetToken = function () {
   const resetToken = crypto.randomBytes(32).toString("hex");
 
@@ -71,12 +84,11 @@ userSchema.methods.createPasswordResetToken = function () {
     .update(resetToken)
     .digest("hex");
 
-  this.passwordResetExpires = Date.now() + 10 * 60 * 1000; // Expires in 10 minutes
+  this.passwordResetExpires = Date.now() + 10 * 60 * 1000;
 
-  return resetToken; // Return the unhashed token to be sent via email
+  return resetToken;
 };
 
-// --- Virtuals (No changes needed here) ---
 userSchema.virtual("employerProfile", {
   ref: "EmployerProfile",
   localField: "_id",
