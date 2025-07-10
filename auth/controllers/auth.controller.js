@@ -6,8 +6,6 @@ import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
 import crypto from "crypto";
 import sendEmail from "../../utils/email.js";
-
-// --- NEW IMPORT ---
 import {
   getEmployerWelcomeTemplate,
   getEmployeeWelcomeTemplate,
@@ -15,14 +13,12 @@ import {
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// Helper for PERMANENT login token (30 days)
 const generateToken = (id, role) => {
   return jwt.sign({ id, role }, process.env.JWT_SECRET, {
     expiresIn: "30d",
   });
 };
 
-// HELPER: For TEMPORARY OTP token (15 minutes)
 const generateTempToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: "15m",
@@ -35,7 +31,7 @@ const sendTokenResponse = (user, statusCode, res) => {
     expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "none",
+    // sameSite: "none",
   };
   res
     .status(statusCode)
@@ -52,17 +48,12 @@ const sendTokenResponse = (user, statusCode, res) => {
     });
 };
 
-// --- UPDATED & MORE ROBUST HELPER FUNCTION ---
 const sendWelcomeEmail = async (user) => {
   try {
-    // <-- FIX: Use optional chaining (?.) and provide a fallback to prevent crashes.
     const firstName = user.fullName?.split(" ")[0] || "there";
     let subject = "";
     let htmlBody = "";
 
-    // IMPORTANT: Based on your frontend code:
-    // 'employer' role is for "Teacher / Candidate"
-    // 'college' role is for "School / College"
     if (user.role === "employer") {
       subject = "✅ Welcome to TeacherJob.in – Let’s Build Your Career!";
       htmlBody = getEmployeeWelcomeTemplate(firstName);
@@ -77,27 +68,18 @@ const sendWelcomeEmail = async (user) => {
         subject: subject,
         html: htmlBody,
       });
-      console.log(`Welcome email sent to ${user.email} for role ${user.role}`);
     }
   } catch (error) {
     console.error(`Failed to send welcome email to ${user.email}:`, error);
   }
 };
 
-// 1. SIGNUP: Now sends a temporary token with the response
 export const signup = async (req, res) => {
-  let { fullName, email, password, confirmPassword, role, termsAccepted } =
-    req.body;
+  let { fullName, email, mobile, password, confirmPassword, role, termsAccepted } = req.body;
   if (role) role = role.toLowerCase().trim();
-  console.log(role);
 
   if (
-    !fullName ||
-    !email ||
-    !password ||
-    !confirmPassword ||
-    !role ||
-    !termsAccepted
+    !fullName || !email || !mobile || !password || !confirmPassword || !role || !termsAccepted
   ) {
     return res.status(400).json({
       success: false,
@@ -111,21 +93,22 @@ export const signup = async (req, res) => {
   }
 
   try {
-    const userExists = await User.findOne({ email });
+    const userExists = await User.findOne({ $or: [{ email }, { mobile }] });
     if (userExists && userExists.isVerified) {
       return res.status(400).json({
         success: false,
-        message: "An account with this email already exists.",
+        message: "An account with this email or mobile already exists.",
       });
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+    const otpExpires = Date.now() + 10 * 60 * 1000;
 
     let user;
     if (userExists && !userExists.isVerified) {
       user = userExists;
       user.fullName = fullName;
+      user.mobile = mobile;
       user.password = password;
       user.otp = otp;
       user.otpExpires = otpExpires;
@@ -134,6 +117,7 @@ export const signup = async (req, res) => {
       user = new User({
         fullName,
         email,
+        mobile,
         password,
         role,
         termsAccepted,
@@ -142,25 +126,16 @@ export const signup = async (req, res) => {
       });
     }
 
-    if (
-      role === "employer" &&
-      !(await EmployerProfile.findOne({ user: user._id }))
-    ) {
-      await EmployerProfile.create({ user: user._id, name: fullName });
-    } else if (
-      role === "college" &&
-      !(await CollegeProfile.findOne({ user: user._id }))
-    ) {
-      await CollegeProfile.create({ user: user._id, name: fullName });
-    } else if (
-      role === "admin" &&
-      !(await AdminProfile.findOne({ user: user._id }))
-    ) {
-      await AdminProfile.create({ user: user._id, name: fullName });
-    }
-
     await user.save();
-
+    
+    if (role === "employer") {
+      await EmployerProfile.findOneAndUpdate({ user: user._id }, { name: fullName, phone: mobile }, { upsert: true, new: true });
+    } else if (role === "college") {
+      await CollegeProfile.findOneAndUpdate({ user: user._id }, { name: fullName, phone: mobile }, { upsert: true, new: true });
+    } else if (role === "admin") {
+      await AdminProfile.findOneAndUpdate({ user: user._id }, { name: fullName, phone: mobile }, { upsert: true, new: true });
+    }
+    
     const message = `Welcome! Your OTP is: ${otp}. It is valid for 10 minutes.`;
     await sendEmail({
       email: user.email,
@@ -184,7 +159,6 @@ export const signup = async (req, res) => {
   }
 };
 
-// 2. VERIFY OTP: Now uses the temporary token and sends a welcome email
 export const verifyOtp = async (req, res) => {
   const { otp } = req.body;
   const authHeader = req.headers.authorization;
@@ -205,7 +179,6 @@ export const verifyOtp = async (req, res) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
     const user = await User.findOne({
       _id: decoded.id,
       otp,
@@ -235,7 +208,6 @@ export const verifyOtp = async (req, res) => {
   }
 };
 
-// 3. LOGIN: Authenticates a user and checks if they are verified
 export const login = async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -266,7 +238,6 @@ export const login = async (req, res) => {
   }
 };
 
-// 4. FORGOT PASSWORD: Sends a password reset link to the user's email
 export const forgotPassword = async (req, res) => {
   const { email } = req.body;
   try {
@@ -299,7 +270,6 @@ export const forgotPassword = async (req, res) => {
   }
 };
 
-// 5. RESET PASSWORD: Sets a new password using the reset token
 export const resetPassword = async (req, res) => {
   try {
     const hashedToken = crypto
@@ -349,7 +319,6 @@ export const resetPassword = async (req, res) => {
   }
 };
 
-// 6. GOOGLE LOGIN: Logs in or signs up a user via Google
 export const googleLogin = async (req, res) => {
   const { token, role } = req.body;
   try {
@@ -361,10 +330,8 @@ export const googleLogin = async (req, res) => {
     let user = await User.findOne({ email });
 
     if (user) {
-      // User exists, just log them in
       sendTokenResponse(user, 200, res);
     } else {
-      // This is a new user, create an account
       if (!role) {
         return res.status(400).json({
           success: false,
@@ -373,14 +340,13 @@ export const googleLogin = async (req, res) => {
       }
       const randomPassword = crypto.randomBytes(16).toString("hex");
 
-      // <-- FIX: Added 'fullName: name' to save it to the User model.
       user = await User.create({
         fullName: name,
         email,
         password: randomPassword,
         role,
         termsAccepted: true,
-        isVerified: true, // Google users are pre-verified
+        isVerified: true,
       });
 
       if (role === "employer") {
@@ -400,10 +366,8 @@ export const googleLogin = async (req, res) => {
           .status(400)
           .json({ success: false, message: "Invalid role for Google signup." });
       }
-
-      // <-- IMPROVEMENT: Send a welcome email to new Google sign-up users
+      
       await sendWelcomeEmail(user);
-
       sendTokenResponse(user, 201, res);
     }
   } catch (error) {
@@ -412,19 +376,16 @@ export const googleLogin = async (req, res) => {
   }
 };
 
-// 7. LOGOUT: Clears the authentication cookie
 export const logout = (req, res) => {
   res.clearCookie('token', {
     httpOnly: true,
-    secure: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: 'none',
-    path: '/' // ✅ but ❌ no domain
+    path: '/'
   });
-
   res.status(200).json({ success: true, message: 'Logged out successfully' });
 };
 
-// 8. GET ME: Retrieves the currently logged-in user's data
 export const getMe = async (req, res) => {
   try {
     if (!req.user || !req.user.id) {
@@ -452,7 +413,6 @@ export const getMe = async (req, res) => {
   }
 };
 
-// 9. UPDATE PASSWORD: Allows a logged-in user to change their password
 export const updatePassword = async (req, res) => {
   if (!req.user || !req.user.id) {
     return res.status(401).json({ success: false, message: "Not authorized" });
@@ -475,7 +435,6 @@ export const updatePassword = async (req, res) => {
   }
 };
 
-// 10. DELETE ACCOUNT: Allows a logged-in user to delete their account
 export const deleteAccount = async (req, res) => {
   if (!req.user || !req.user.id) {
     return res.status(401).json({ success: false, message: "Not authorized" });
@@ -503,9 +462,11 @@ export const deleteAccount = async (req, res) => {
 
     await user.deleteOne();
 
-    res.cookie("token", "none", {
-      expires: new Date(Date.now() + 5 * 1000),
+    res.clearCookie('token', {
       httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: 'none',
+      path: '/'
     });
     res.status(200).json({
       success: true,
