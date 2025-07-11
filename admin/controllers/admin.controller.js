@@ -4,10 +4,10 @@ import { User } from '../../models/User.model.js';
 import { EmployerProfile } from '../../employer/models/profile.model.js';
 import { CollegeProfile } from '../../college/models/profile.model.js';
 import { AdminProfile } from '../models/profile.model.js';
-import { Review } from '../../models/Review.model.js';
 import { createNotification } from '../../notifications/controllers/notification.controller.js';
 import mongoose from 'mongoose';
 import { uploadOnS3 } from '../../config/s3Config.js';
+import { Review } from '../../models/Review.model.js';
 
 export const getCollegeListForAdmin = async (req, res) => {
     try {
