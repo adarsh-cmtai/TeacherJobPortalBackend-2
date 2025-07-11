@@ -304,7 +304,7 @@ export const getAllUsersByRole = async (req, res) => {
 export const getAllUsers = async (req, res) => {
     try {
         const users = await User.find({})
-            .populate('employerProfile', 'name')
+            .populate('employerProfile', 'name headline')
             .populate('collegeProfile', 'name')
             .populate('adminProfile', 'name')
             .select('-password');
