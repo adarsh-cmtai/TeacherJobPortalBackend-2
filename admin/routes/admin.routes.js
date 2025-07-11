@@ -27,11 +27,13 @@ import {
     getPendingApplications,
     getPendingJobs,
     getCollegeListForAdmin,
+    getPublicColleges,
     getPendingDocumentApplications,
     verifyDocuments,
     getInterviewApplications
 } from '../controllers/admin.controller.js';
 import { createReviewByAdmin, getAllReviews, updateReview, deleteReview } from '../controllers/admin.review.controller.js';
+import { createSystemWideNotification } from '../../notifications/controllers/notification.controller.js';
 import { agreementUpload } from '../../middleware/multer.js';
 
 const router = express.Router();
@@ -85,5 +87,6 @@ router.route('/reviews/:reviewId').put(updateReview).delete(deleteReview);
 
 router.get('/colleges', getCollegeListForAdmin);
 
+router.post('/system-alert', createSystemWideNotification);
 
 export default router;
