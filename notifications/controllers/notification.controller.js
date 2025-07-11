@@ -1,10 +1,40 @@
 import { Notification } from '../models/notification.model.js';
+import { User } from '../../models/User.model.js';
 
 export const createNotification = async (recipientId, message, link) => {
     try {
         await Notification.create({ recipient: recipientId, message, link });
     } catch (error) {
         console.error("Error creating notification:", error);
+    }
+};
+
+export const createSystemWideNotification = async (req, res) => {
+    try {
+        const { message } = req.body;
+        if (!message) {
+            return res.status(400).json({ message: 'A message is required.' });
+        }
+
+        const usersToNotify = await User.find({ role: { $in: ['employer', 'college'] } }).select('_id');
+        if (usersToNotify.length === 0) {
+            return res.status(200).json({ success: true, message: 'No users to notify.' });
+        }
+
+        const notificationPromises = usersToNotify.map(user => 
+            Notification.create({
+                recipient: user._id,
+                message: message,
+                link: '/notifications'
+            })
+        );
+
+        await Promise.all(notificationPromises);
+
+        res.status(200).json({ success: true, message: `Notification sent to ${usersToNotify.length} users.` });
+
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to send system-wide notification.', error: error.message });
     }
 };
 
