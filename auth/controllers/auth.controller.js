@@ -31,7 +31,6 @@ const sendTokenResponse = (user, statusCode, res) => {
     expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "none",
   };
   res
     .status(statusCode)
@@ -76,24 +75,24 @@ const sendWelcomeEmail = async (user) => {
 
 export const signup = async (req, res) => {
   let { fullName, email, mobile, password, confirmPassword, role, termsAccepted } = req.body;
+  
   if (role) role = role.toLowerCase().trim();
+  if (email) email = email.toLowerCase().trim();
 
-  if (
-    !fullName || !email || !mobile || !password || !confirmPassword || !role || !termsAccepted
-  ) {
+  if (!fullName || !email || !mobile || !password || !confirmPassword || !role || !termsAccepted) {
     return res.status(400).json({
       success: false,
       message: "Please provide all fields and accept terms",
     });
   }
+
   if (password !== confirmPassword) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Passwords do not match" });
+    return res.status(400).json({ success: false, message: "Passwords do not match" });
   }
 
   try {
     const userExists = await User.findOne({ $or: [{ email }, { mobile }] });
+
     if (userExists && userExists.isVerified) {
       return res.status(400).json({
         success: false,
@@ -108,11 +107,13 @@ export const signup = async (req, res) => {
     if (userExists && !userExists.isVerified) {
       user = userExists;
       user.fullName = fullName;
+      user.email = email;
       user.mobile = mobile;
       user.password = password;
       user.otp = otp;
       user.otpExpires = otpExpires;
       user.role = role;
+      user.termsAccepted = termsAccepted;
     } else {
       user = new User({
         fullName,
@@ -128,12 +129,13 @@ export const signup = async (req, res) => {
 
     await user.save();
     
+    const profileData = { name: fullName, phone: mobile };
     if (role === "employer") {
-      await EmployerProfile.findOneAndUpdate({ user: user._id }, { name: fullName, phone: mobile }, { upsert: true, new: true });
+      await EmployerProfile.findOneAndUpdate({ user: user._id }, profileData, { upsert: true, new: true });
     } else if (role === "college") {
-      await CollegeProfile.findOneAndUpdate({ user: user._id }, { name: fullName, phone: mobile }, { upsert: true, new: true });
+      await CollegeProfile.findOneAndUpdate({ user: user._id }, profileData, { upsert: true, new: true });
     } else if (role === "admin") {
-      await AdminProfile.findOneAndUpdate({ user: user._id }, { name: fullName, phone: mobile }, { upsert: true, new: true });
+      await AdminProfile.findOneAndUpdate({ user: user._id }, profileData, { upsert: true, new: true });
     }
     
     const message = `Welcome! Your OTP is: ${otp}. It is valid for 10 minutes.`;
@@ -172,9 +174,7 @@ export const verifyOtp = async (req, res) => {
   const token = authHeader.split(" ")[1];
 
   if (!otp) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Please provide the OTP." });
+    return res.status(400).json({ success: false, message: "Please provide the OTP." });
   }
 
   try {
@@ -202,46 +202,37 @@ export const verifyOtp = async (req, res) => {
     sendTokenResponse(user, 200, res);
   } catch (error) {
     console.error("Verify OTP Error:", error);
-    res
-      .status(401)
-      .json({ success: false, message: "Token failed, expired, or invalid." });
+    res.status(401).json({ success: false, message: "Token failed, expired, or invalid." });
   }
 };
 
 export const login = async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Please provide email and password" });
+    return res.status(400).json({ success: false, message: "Please provide email and password" });
   }
   try {
-    const user = await User.findOne({ email }).select("+password");
+    const user = await User.findOne({ email: email.toLowerCase().trim() }).select("+password");
     if (!user || !(await user.comparePassword(password))) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Invalid email or password" });
+      return res.status(401).json({ success: false, message: "Invalid email or password" });
     }
     if (!user.isVerified) {
       return res.status(403).json({
         success: false,
-        message:
-          "Account not verified. Please check your email for a verification code.",
+        message: "Account not verified. Please check your email for a verification code.",
       });
     }
     sendTokenResponse(user, 200, res);
   } catch (error) {
     console.error("Login Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: "Server error during login." });
+    res.status(500).json({ success: false, message: "Server error during login." });
   }
 };
 
 export const forgotPassword = async (req, res) => {
   const { email } = req.body;
   try {
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) {
       return res.status(200).json({
         success: true,
@@ -272,27 +263,19 @@ export const forgotPassword = async (req, res) => {
 
 export const resetPassword = async (req, res) => {
   try {
-    const hashedToken = crypto
-      .createHash("sha256")
-      .update(req.params.token)
-      .digest("hex");
-
+    const hashedToken = crypto.createHash("sha256").update(req.params.token).digest("hex");
     const user = await User.findOne({
       passwordResetToken: hashedToken,
       passwordResetExpires: { $gt: Date.now() },
     });
 
     if (!user) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Token is invalid or has expired." });
+      return res.status(400).json({ success: false, message: "Token is invalid or has expired." });
     }
 
     const { password, confirmPassword } = req.body;
     if (password !== confirmPassword) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Passwords do not match." });
+      return res.status(400).json({ success: false, message: "Passwords do not match." });
     }
     if (!password || password.length < 6) {
       return res.status(400).json({
@@ -330,6 +313,10 @@ export const googleLogin = async (req, res) => {
     let user = await User.findOne({ email });
 
     if (user) {
+      if (!user.isVerified) {
+        user.isVerified = true;
+        await user.save();
+      }
       sendTokenResponse(user, 200, res);
     } else {
       if (!role) {
@@ -362,9 +349,7 @@ export const googleLogin = async (req, res) => {
           logo: { url: picture },
         });
       } else {
-        return res
-          .status(400)
-          .json({ success: false, message: "Invalid role for Google signup." });
+        return res.status(400).json({ success: false, message: "Invalid role for Google signup." });
       }
       
       await sendWelcomeEmail(user);
@@ -389,15 +374,11 @@ export const logout = (req, res) => {
 export const getMe = async (req, res) => {
   try {
     if (!req.user || !req.user.id) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Not authorized, no user found" });
+      return res.status(401).json({ success: false, message: "Not authorized, no user found" });
     }
     const user = await User.findById(req.user.id);
     if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found." });
+      return res.status(404).json({ success: false, message: "User not found." });
     }
     res.status(200).json({
       success: true,
@@ -421,15 +402,11 @@ export const updatePassword = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("+password");
     if (!(await user.comparePassword(currentPassword))) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Incorrect current password" });
+      return res.status(401).json({ success: false, message: "Incorrect current password" });
     }
     user.password = newPassword;
     await user.save();
-    res
-      .status(200)
-      .json({ success: true, message: "Password updated successfully" });
+    res.status(200).json({ success: true, message: "Password updated successfully" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -449,9 +426,7 @@ export const deleteAccount = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("+password");
     if (!user || !(await user.comparePassword(password))) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Incorrect password" });
+      return res.status(401).json({ success: false, message: "Incorrect password" });
     }
 
     if (user.role === "employer") {
