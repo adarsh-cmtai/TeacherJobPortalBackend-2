@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+
 const collegeProfileSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
     name: { type: String, required: true },
@@ -13,6 +14,12 @@ const collegeProfileSchema = new mongoose.Schema({
     facultyCount: { type: String, default: '0' },
     departments: { type: [String], default: [] },
     facilities: { type: [String], default: [] },
+    contactPerson: {
+        name: { type: String, default: '' },
+        email: { type: String, default: '' },
+        phone: { type: String, default: '' },
+        position: { type: String, default: '' },
+    },
     settings: {
         notifications: {
             newApplications: { type: Boolean, default: true },
@@ -24,4 +31,5 @@ const collegeProfileSchema = new mongoose.Schema({
         }
     }
 }, { timestamps: true });
+
 export const CollegeProfile = mongoose.model('CollegeProfile', collegeProfileSchema);
