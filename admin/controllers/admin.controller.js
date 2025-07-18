@@ -179,12 +179,12 @@ export const getPendingApplications = async (req, res) => {
 
 export const createJobByAdmin = async (req, res) => {
     try {
-        const { title, schoolName, location, description, type, salary, postedBy } = req.body;
+        const { title, schoolName, location, description, type, salary,requirements,responsibilities,department,subjects,applicationDeadline,benefits, postedBy } = req.body;
         if (!title || !schoolName || !location || !postedBy) {
             return res.status(400).json({ message: 'Title, schoolName, location, and postedBy (college user ID) are required.' });
         }
         const job = await Job.create({
-            title, schoolName, location, description, type, salary,
+            title, schoolName, location, description, type, salary,requirements,responsibilities,department,subjects,applicationDeadline,benefits,
             postedBy,
             approvedBy: req.user.id,
             status: 'active'
