@@ -24,6 +24,14 @@ import resourceRoute from "./admin/routes/resource.routes.js";
 import pressArticle from "./admin/routes/pressArticle.routes.js";
 import PostjobRoutes from "./employer/routes/Postjob.routes.js";
 import carouselRoutes from './admin/routes/carousel.routes.js';
+import OpenAI from 'openai';
+
+// ✅ FIXED: Use official OpenAI API endpoint
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  // ❌ baseURL: "https://api.pawan.krd/v1", ← REMOVE THIS LINE
+  // ✅ Official endpoint will be used by default
+});
 
 // Initialize database connection after loading environment variables
 connectDB();
@@ -73,6 +81,51 @@ app.use("/api/review", publicReviewRoutes);
 app.use("/api/resource", resourceRoute);
 app.use("/api/press-articles", pressArticle);
 app.use("/api/post-jobs", PostjobRoutes);
+
+
+app.post('/api/generate-resume', async (req, res) => {
+  const { profile } = req.body;
+
+  if (!profile) {
+    return res.status(400).json({ error: 'Profile data is required' });
+  }
+
+  try {
+    const prompt = `
+    You are a JSON generation machine. Your sole purpose is to convert the user's profile data into a perfectly structured JSON object based on the following rules. Failure to produce valid JSON is a critical error.
+
+    Rules:
+    1.  **Professional Summary**: Create a new top-level string field named "summary". It should be an engaging 3-4 sentence paragraph highlighting the candidate's experience, expertise, and passion for teaching.
+    2.  **Headline**: Rewrite the 'headline' to be dynamic and impactful.
+    3.  **Work Experience**: For each item in 'workExperience', create a 'description' array of 4-5 detailed, achievement-oriented bullet points starting with strong action verbs.
+    4.  **Skills**: Restructure the flat 'skills' array into a single object with categorized keys: "technical", "teaching", and "subjectExpertise". Populate these keys with arrays of relevant skill names (as strings).
+
+    ### CRITICAL OUTPUT FORMAT - FOLLOW EXACTLY ###
+    -   **MUST** return only a raw JSON object.
+    -   **NO** introductory text, explanations, or apologies.
+    -   **NO** markdown formatting like \`\`\`json.
+    -   **VALID SYNTAX IS MANDATORY**. Ensure all commas, brackets, and braces are correct. No trailing commas. The output is parsed programmatically.
+
+    Input Data:
+    ${JSON.stringify(profile)}
+  `;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini", // ✅ Use supported model
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+    });
+
+    const enhancedProfileText = response.choices[0].message.content;
+    const enhancedProfileJson = JSON.parse(enhancedProfileText);
+
+    res.json(enhancedProfileJson);
+
+  } catch (error) {
+    console.error('Error with OpenAI API:', error);
+    res.status(500).json({ error: 'Failed to generate AI resume' });
+  }
+});
 
 app.get("/", (req, res) => {
   res.send("API is running...");
