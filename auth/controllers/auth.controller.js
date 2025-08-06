@@ -10,8 +10,6 @@ import {
   getEmployerWelcomeTemplate,
   getEmployeeWelcomeTemplate,
 } from "../../utils/emailTemplates.js";
-import bcrypt from "bcrypt";
-import mongoose from "mongoose";
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -21,8 +19,8 @@ const generateToken = (id, role) => {
   });
 };
 
-const generateTempToken = (payload) => {
-  return jwt.sign(payload, process.env.JWT_SECRET, {
+const generateTempToken = (id) => {
+  return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: "15m",
   });
 };
@@ -78,7 +76,7 @@ const sendWelcomeEmail = async (user) => {
 
 export const signup = async (req, res) => {
   let { fullName, email, mobile, password, confirmPassword, role, termsAccepted } = req.body;
-
+  
   if (role) role = role.toLowerCase().trim();
   if (email) email = email.toLowerCase().trim();
 
@@ -94,9 +92,9 @@ export const signup = async (req, res) => {
   }
 
   try {
-    const userExists = await User.findOne({ $or: [{ email }, { mobile }], isVerified: true });
+    const userExists = await User.findOne({ $or: [{ email }, { mobile }] });
 
-    if (userExists) {
+    if (userExists && userExists.isVerified) {
       return res.status(400).json({
         success: false,
         message: "An account with this email or mobile already exists.",
@@ -104,32 +102,55 @@ export const signup = async (req, res) => {
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpires = Date.now() + 10 * 60 * 1000;
 
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    let user;
+    if (userExists && !userExists.isVerified) {
+      user = userExists;
+      user.fullName = fullName;
+      user.email = email;
+      user.mobile = mobile;
+      user.password = password;
+      user.otp = otp;
+      user.otpExpires = otpExpires;
+      user.role = role;
+      user.termsAccepted = termsAccepted;
+    } else {
+      user = new User({
+        fullName,
+        email,
+        mobile,
+        password,
+        role,
+        termsAccepted,
+        otp,
+        otpExpires,
+      });
+    }
 
-    const tempUserData = {
-      fullName,
-      email,
-      mobile,
-      password: hashedPassword,
-      role,
-      termsAccepted,
-      otp,
-    };
-
-    const tempToken = generateTempToken(tempUserData);
+    await user.save();
     
-    const message = `Welcome! Your OTP is: ${otp}. It is valid for 15 minutes.`;
+    const profileData = { name: fullName, phone: mobile };
+    if (role === "employer") {
+      await EmployerProfile.findOneAndUpdate({ user: user._id }, profileData, { upsert: true, new: true });
+    } else if (role === "college") {
+      await CollegeProfile.findOneAndUpdate({ user: user._id }, profileData, { upsert: true, new: true });
+    } else if (role === "admin") {
+      await AdminProfile.findOneAndUpdate({ user: user._id }, profileData, { upsert: true, new: true });
+    }
+    
+    const message = `Welcome! Your OTP is: ${otp}. It is valid for 10 minutes.`;
     await sendEmail({
-      email: email,
+      email: user.email,
       subject: "Your Email Verification Code",
       message,
     });
 
+    const tempToken = generateTempToken(user._id);
+
     return res.status(200).json({
       success: true,
-      message: `An OTP has been sent to ${email}. Please verify.`,
+      message: `An OTP has been sent to ${user.email}. Please verify.`,
       tempToken: tempToken,
     });
   } catch (error) {
@@ -159,63 +180,30 @@ export const verifyOtp = async (req, res) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findOne({
+      _id: decoded.id,
+      otp,
+      otpExpires: { $gt: Date.now() },
+    });
 
-    if (decoded.otp !== otp) {
+    if (!user) {
       return res.status(400).json({
         success: false,
         message: "The OTP is invalid or has expired.",
       });
     }
 
-    const { fullName, email, mobile, password, role, termsAccepted } = decoded;
-
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      return res.status(400).json({
-        success: false,
-        message: "An account with this email already exists.",
-      });
-    }
-    
-    const newUserId = new mongoose.Types.ObjectId();
-
-    await User.collection.insertOne({
-        _id: newUserId,
-        fullName,
-        email,
-        mobile,
-        password,
-        role,
-        termsAccepted,
-        isVerified: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-    });
-
-    const user = await User.findById(newUserId);
-
-    if (!user) {
-        throw new Error('Failed to create user account after verification.');
-    }
-
-    const profileData = { name: fullName, phone: mobile, user: user._id };
-    if (role === "employer") {
-      await EmployerProfile.create(profileData);
-    } else if (role === "college") {
-      await CollegeProfile.create(profileData);
-    } else if (role === "admin") {
-      await AdminProfile.create(profileData);
-    }
+    user.isVerified = true;
+    user.otp = undefined;
+    user.otpExpires = undefined;
+    await user.save();
 
     await sendWelcomeEmail(user);
 
-    sendTokenResponse(user, 201, res);
+    sendTokenResponse(user, 200, res);
   } catch (error) {
     console.error("Verify OTP Error:", error);
-    if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
-        return res.status(401).json({ success: false, message: "Verification failed. The session may have expired. Please sign up again." });
-    }
-    res.status(500).json({ success: false, message: "An error occurred during verification." });
+    res.status(401).json({ success: false, message: "Token failed, expired, or invalid." });
   }
 };
 
